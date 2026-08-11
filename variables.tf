@@ -12,8 +12,8 @@ variable "app_name" {
     (.github/workflows/terraform-oidc.yml) y, en un repo real de app, con el
     sufijo del nombre del repo (infra-3-apps-<univ>-<app_name>, ADR-005).
   EOT
-  type = string
-  default = "hello-world"
+  type        = string
+  default     = "hello-world"
 
   validation {
     condition     = can(regex("^[a-z][a-z0-9-]*$", var.app_name))
@@ -51,7 +51,7 @@ variable "folder_id" {
     error mas caro de deshacer -- se prefiere que falle explicito si el
     fetch de CI no corrio.
   EOT
-  type = string
+  type        = string
 
   validation {
     condition     = can(regex("^folders/[0-9]+$", var.folder_id))
@@ -72,8 +72,8 @@ variable "host_project_id" {
     artifact'). Default: valor real conocido de este sandbox, mismo patron
     de fallback que infra-2-univ/variables.tf usa para hub_project_id.
   EOT
-  type    = string
-  default = "prj-net-upn"
+  type        = string
+  default     = "prj-net-upn"
 
   validation {
     condition     = can(regex("^prj-[a-z0-9-]+$", var.host_project_id))
@@ -88,8 +88,8 @@ variable "run_subnetwork" {
     service-project). Normalmente provista via TF_VAR_run_subnetwork.
     Default: valor real conocido de este sandbox para dev.
   EOT
-  type    = string
-  default = "us-central1/sb-run-upn-dev"
+  type        = string
+  default     = "us-central1/sb-run-upn-dev"
 
   validation {
     condition     = can(regex("^[a-z0-9-]+/[a-z0-9-]+$", var.run_subnetwork))
@@ -115,8 +115,8 @@ variable "image" {
     2.3) -- valida el plumbing completo de la landing zone (red, LB, IAM,
     Cloud Armor) sin acoplar un pipeline de build propio a este hito.
   EOT
-  type    = string
-  default = "us-docker.pkg.dev/cloudrun/container/hello"
+  type        = string
+  default     = "us-docker.pkg.dev/cloudrun/container/hello"
 }
 
 variable "min_instances" {
@@ -175,7 +175,7 @@ variable "iam_invokers" {
     tiene implementado todavia, asi que este default no deberia bloquearse
     en CI hoy.
   EOT
-  type = map(list(string))
+  type        = map(list(string))
   default = {
     "roles/run.invoker" = ["allUsers"]
   }
@@ -189,7 +189,7 @@ variable "cloudflare_ip_ranges" {
     agregar/modificar rangos -- revisar periodicamente contra la fuente
     oficial, no asumir que este default se mantiene vigente indefinidamente.
   EOT
-  type = list(string)
+  type        = list(string)
   default = [
     "173.245.48.0/20",
     "103.21.244.0/22",

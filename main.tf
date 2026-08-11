@@ -28,7 +28,7 @@ locals {
   # el formato 'region/nombre' -- el mismo formato que publica infra-2-univ.
   # Se construye el self-link real a partir de host_project_id + los dos
   # componentes del string, sin necesitar un data source adicional.
-  run_subnetwork_parts = split("/", module.app_project.run_subnetwork)
+  run_subnetwork_parts     = split("/", module.app_project.run_subnetwork)
   run_subnetwork_self_link = "https://www.googleapis.com/compute/v1/projects/${module.app_project.host_project_id}/regions/${local.run_subnetwork_parts[0]}/subnetworks/${local.run_subnetwork_parts[1]}"
 }
 

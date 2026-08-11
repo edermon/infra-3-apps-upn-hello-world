@@ -16,7 +16,7 @@ output "service_uri" {
     general de la universidad (infra-1-hub) una vez registrado el backend
     via exposed-apps.yaml (Fase 5).
   EOT
-  value = module.service.service_uri
+  value       = module.service.service_uri
 }
 
 output "service_account_email" {
