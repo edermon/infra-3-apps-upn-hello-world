@@ -82,7 +82,20 @@ jobs:
       APP_NAME: ${{ vars.APP_NAME || 'app' }}
       APP_ENVIRONMENT: ${{ vars.APP_ENVIRONMENT || 'dev' }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET || format('prj-cicd-sandbox-tfstate-apps-{0}', vars.UNIVERSITY_CODE || 'upn') }}
-      TF_STATE_PREFIX: ${{ vars.TF_STATE_PREFIX || format('{0}/{1}', vars.UNIVERSITY_CODE || 'upn', vars.APP_NAME || 'app') }}
+      # FIX (11-ago-2026, a pedido del usuario tras revisar el primer plan
+      # real): el prefix DEBE incluir el ambiente. Este mismo repo se
+      # reutiliza para dev/cert/prod de esta app (un repo por app, no uno
+      # por app+ambiente -- mismo patron que infra-2-univ, ver
+      # APP_ENVIRONMENT mas abajo en los pasos de fetch de outputs). Sin el
+      # ambiente en el prefix, un futuro apply de cert/prod pisaria el
+      # mismo objeto de state que dev -- el bucket es por UNIVERSIDAD, no
+      # por ambiente (sa-tf-apps-<univ> tiene objectAdmin sobre el bucket
+      # completo, sin condition de prefix, ver infra-bootstrap/main.tf), asi
+      # que aqui es donde se separa. NOTA: infra-2-univ tiene el mismo tipo
+      # de riesgo (su prefix 'univ/upn' tampoco incluye ambiente) pero ya
+      # tiene state real aplicado en dev -- cambiarlo ahi requeriria una
+      # migracion de state, fuera de alcance de este hito.
+      TF_STATE_PREFIX: ${{ vars.TF_STATE_PREFIX || format('{0}/{1}/{2}', vars.UNIVERSITY_CODE || 'upn', vars.APP_NAME || 'app', vars.APP_ENVIRONMENT || 'dev') }}
       TF_ACTION: ${{ inputs.action || 'plan' }}
       TF_VAR_execution_service_account: ${{ vars.TF_VAR_execution_service_account || '' }}
     steps:
