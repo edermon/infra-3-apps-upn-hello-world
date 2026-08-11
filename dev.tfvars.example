@@ -1,0 +1,23 @@
+# dev.tfvars.example -- Hello World UPN (Fase 3/4)
+#
+# host_project_id, run_subnetwork, folder_id, billing_account_id: NO se
+# fijan aqui a proposito -- los provee CI via TF_VAR_* desde los artefactos
+# de outputs de infra-2-univ/infra-0-org (ver
+# .github/workflows/terraform-oidc.yml, pasos 'Fetch net/org outputs
+# artifact'). Si el fetch falla, caen a los defaults de variables.tf (ya
+# verificados correctos para este sandbox, salvo folder_id/
+# billing_account_id que no tienen default a proposito). NO agregarlos aqui
+# de vuelta -- un valor en .auto.tfvars/-var-file siempre gana sobre el
+# TF_VAR_* de CI y anularia el mecanismo (misma leccion de
+# infra-2-univ/dev.tfvars.example).
+
+university_code = "upn"
+app_name        = "hello-world"
+environment     = "dev"
+image           = "us-docker.pkg.dev/cloudrun/container/hello"
+
+cost_labels = {
+  managed_by   = "terraform"
+  cost_center  = "education"
+  cost_project = "hello-world"
+}

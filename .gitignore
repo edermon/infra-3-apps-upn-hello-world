@@ -1,0 +1,55 @@
+# Terraform local state & cache
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate*
+**/*.tfstate
+**/*.tfstate.*
+crash.log
+crash.*.log
+
+# Sensitive configuration files (NEVER commit!)
+*.auto.tfvars
+terraform.tfvars
+*.tfvars
+!*.tfvars.example
+
+# Local development files
+local*.tfvars
+local*.auto.tfvars
+/tmp/
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.env
+.env.local
+
+# Build artifacts
+dist/
+build/
+*.tar.gz
+*.zip
+
+# Logs
+*.log
+logs/
+
+# Direnv
+.envrc
+.direnv/
+
+# GCP service account keys (should never be committed)
+*.json
+!*.tfvars.example.json
+!config.json
+
+# Terraform plan output (contiene datos sensibles, nunca commitear)
+tfplan
+*.tfplan
+
+# Archivos temporales de proceso
+*.tmp

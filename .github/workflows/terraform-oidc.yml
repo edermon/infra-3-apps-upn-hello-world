@@ -1,0 +1,263 @@
+name: terraform-oidc
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Terraform action to run
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+      confirm_destroy:
+        description: Type "destroy-app-layer" to confirm destruction
+        required: false
+        type: string
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TF_IN_AUTOMATION: true
+  TF_INPUT: false
+
+jobs:
+  validate-destroy:
+    if: ${{ github.event.inputs.action == 'destroy' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate destroy confirmation
+        run: |
+          if [[ "${{ github.event.inputs.confirm_destroy }}" != "destroy-app-layer" ]]; then
+            echo "❌ Destroy confirmation failed!"
+            echo "To confirm destruction, set confirm_destroy to: destroy-app-layer"
+            exit 1
+          fi
+          echo "✅ Destroy confirmation validated"
+
+  terraform:
+    needs: [validate-destroy]
+    if: |
+      ${{ always() &&
+          (github.event.inputs.action != 'destroy' ||
+           needs.validate-destroy.result == 'success') }}
+    runs-on: ubuntu-latest
+    # NOTA (11-ago-2026): a diferencia de infra-0-org/infra-1-hub/infra-2-univ,
+    # este job deliberadamente NO declara `environment:`. sa-tf-apps-<univ>
+    # (ver infra-bootstrap/main.tf, local.apps_sa_keys) no usa el binding WIF
+    # por GitHub Environment (attribute.environment) -- usa
+    # attribute.university, extraido del NOMBRE DEL REPO via
+    # `assertion.repository.extract('<org>/infra-3-apps-{university}-')`
+    # (ver google_iam_workload_identity_pool_provider.github). Esto es asi
+    # porque cada app instancia su PROPIO repo (infra-3-apps-<univ>-<app>,
+    # no un repo compartido con un Environment por universidad), asi que no
+    # hay un Environment central donde atar el binding. Copiar el patron
+    # `environment: <univ>-<capa>` aqui seria incorrecto -- no hay tal
+    # Environment configurado en ningun repo real de apps, y el job fallaria
+    # en el paso de autenticacion.
+    env:
+      # A diferencia de infra-1-hub/infra-2-univ (un repo compartido con un
+      # directorio por universidad, ADR-001), cada app tiene su PROPIO repo
+      # completo (infra-3-apps-<univ>-<app>) -- no hace falta una capa de
+      # subdirectorio por instancia. El codigo Terraform real vive en la raiz
+      # del checkout.
+      TF_WORKING_DIR: ${{ vars.TF_WORKING_DIR || 'repo' }}
+      TF_VARS_FILE: ${{ vars.TF_VARS_FILE || '' }}
+      # Bucket dedicado POR UNIVERSIDAD (no por app) -- ver
+      # infra-bootstrap/main.tf, google_storage_bucket.apps_tfstate_by_university
+      # ("${bootstrap_project_id}-tfstate-apps-${univ_code}"). sa-tf-apps-<univ>
+      # tiene storage.objectAdmin sobre TODO ese bucket (sin condition de
+      # prefix, a diferencia de hub/univ/data) -- por eso el prefix aqui
+      # DEBE incluir el nombre de la app, para que dos apps de la misma
+      # universidad no se pisen el state entre si.
+      UNIVERSITY_CODE: ${{ vars.UNIVERSITY_CODE || 'upn' }}
+      APP_NAME: ${{ vars.APP_NAME || 'app' }}
+      APP_ENVIRONMENT: ${{ vars.APP_ENVIRONMENT || 'dev' }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET || format('prj-cicd-sandbox-tfstate-apps-{0}', vars.UNIVERSITY_CODE || 'upn') }}
+      TF_STATE_PREFIX: ${{ vars.TF_STATE_PREFIX || format('{0}/{1}', vars.UNIVERSITY_CODE || 'upn', vars.APP_NAME || 'app') }}
+      TF_ACTION: ${{ inputs.action || 'plan' }}
+      TF_VAR_execution_service_account: ${{ vars.TF_VAR_execution_service_account || '' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
+      # FIX (11-ago-2026): mismo fix ya aplicado en infra-0-org/infra-bootstrap/
+      # infra-1-hub/infra-2-univ -- secrets.GITHUB_TOKEN no tiene alcance
+      # sobre infra-modules (repo privado), y el source de los modulos en
+      # main.tf usa git::https://github.com/... Sin este paso, `terraform
+      # init` falla con "fatal: could not read Username for 'https://github.com'".
+      - name: Set up SSH access to infra-modules (deploy key)
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.INFRA_MODULES_DEPLOY_KEY }}" > ~/.ssh/infra_modules_deploy_key
+          chmod 600 ~/.ssh/infra_modules_deploy_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          git config --global core.sshCommand "ssh -i ~/.ssh/infra_modules_deploy_key -o IdentitiesOnly=yes"
+          git config --global url."git@github.com:".insteadOf "https://github.com/"
+
+      # CORRECCION (11-ago-2026): la condicion original comparaba
+      # github.event.repository.name contra una lista estatica que incluia
+      # "infra-3-apps-template" pero NUNCA un repo real de app (nombrados
+      # infra-3-apps-<univ>-<app>, ver ADR-005) -- este paso quedaba
+      # silenciosamente saltado en todo repo real. No es el fix critico (el
+      # `terraform init` de los modulos remotos usa el redirect SSH de
+      # arriba, no este checkout), pero se corrige para que el repo de
+      # infra-modules quede disponible localmente si algun main.tf futuro
+      # lo referencia por path relativo.
+      - name: Checkout shared modules
+        if: ${{ github.event.repository.name == 'infra-3-apps-template' || startsWith(github.event.repository.name, 'infra-3-apps-') }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/infra-modules
+          path: infra-modules
+          ssh-key: ${{ secrets.INFRA_MODULES_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - name: Authenticate to Google Cloud via OIDC
+        uses: google-github-actions/auth@v2
+        with:
+          # Mismo WIF pool+provider unico y compartido por todo el org (ver
+          # infra-bootstrap) -- lo que varia es la SA a impersonar
+          # (GCP_SERVICE_ACCOUNT_EMAIL, sa-tf-apps-<univ> para este repo) y
+          # el binding IAM (attribute.university, no attribute.environment).
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER || 'projects/74820497555/locations/global/workloadIdentityPools/github-pool/providers/github-provider' }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      # CIERRE DE BRECHA (11-ago-2026): lee net_project_id y run_subnetwork
+      # del artefacto de outputs curado que infra-2-univ publica tras cada
+      # apply real (ver infra-2-univ .github/workflows/terraform-oidc.yml,
+      # paso "Publish outputs artifact for infra-3-apps-*", y el grant de
+      # IAM acotado en infra-bootstrap,
+      # google_storage_bucket_iam_member.cross_layer_univ_outputs_read_apps).
+      # Si el objeto todavia no existe o el fetch falla, no se bloquea el
+      # plan/apply -- Terraform cae al default de variables.tf (pendiente de
+      # declarar cuando este repo tenga su propio main.tf/variables.tf real).
+      - name: Fetch net outputs artifact (pre-plan)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        env:
+          NET_OUTPUTS_BUCKET: ${{ vars.NET_TF_STATE_BUCKET || 'prj-cicd-sandbox-tfstate-univ' }}
+          NET_OUTPUTS_PREFIX: ${{ vars.NET_TF_STATE_PREFIX || format('univ/{0}', vars.UNIVERSITY_CODE || 'upn') }}
+        run: |
+          set -uo pipefail
+          if gcloud storage cat "gs://${NET_OUTPUTS_BUCKET}/${NET_OUTPUTS_PREFIX}/outputs-public.json" > net-outputs.json 2>/dev/null; then
+            NET_PROJECT_ID="$(jq -r '.net_project_id // empty' net-outputs.json)"
+            RUN_SUBNETWORK="$(jq -r '.run_subnetwork // empty' net-outputs.json)"
+            if [[ -n "$NET_PROJECT_ID" ]]; then
+              echo "TF_VAR_host_project_id=$NET_PROJECT_ID" >> "$GITHUB_ENV"
+              echo "✅ net_project_id (host_project_id) leido del artefacto de infra-2-univ: $NET_PROJECT_ID"
+            fi
+            if [[ -n "$RUN_SUBNETWORK" ]]; then
+              echo "TF_VAR_run_subnetwork=$RUN_SUBNETWORK" >> "$GITHUB_ENV"
+              echo "✅ run_subnetwork leido del artefacto de infra-2-univ: $RUN_SUBNETWORK"
+            fi
+          else
+            echo "⚠️ No se pudo leer gs://${NET_OUTPUTS_BUCKET}/${NET_OUTPUTS_PREFIX}/outputs-public.json (puede que infra-2-univ aun no haya corrido el paso de publicacion) -- se usara el default de variables.tf"
+          fi
+
+      # CIERRE DE BRECHA (11-ago-2026): lee folder_id (para el folder de
+      # ambiente de esta universidad, ver infra-0-org/main.tf
+      # apps_environment_folder_grants) y billing_account_id del artefacto
+      # curado que infra-0-org publica -- ver el grant acotado en
+      # infra-bootstrap, google_storage_bucket_iam_member.cross_layer_org_outputs_read_apps.
+      - name: Fetch org outputs artifact (pre-plan)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        env:
+          ORG_OUTPUTS_BUCKET: ${{ vars.ORG_TF_STATE_BUCKET || 'prj-cicd-sandbox-tfstate-foundation' }}
+          ORG_OUTPUTS_PREFIX: ${{ vars.ORG_TF_STATE_PREFIX || 'foundation/org' }}
+          UNIVERSITY_CODE: ${{ vars.UNIVERSITY_CODE || 'upn' }}
+          APP_ENVIRONMENT: ${{ vars.APP_ENVIRONMENT || 'dev' }}
+        run: |
+          set -uo pipefail
+          if gcloud storage cat "gs://${ORG_OUTPUTS_BUCKET}/${ORG_OUTPUTS_PREFIX}/outputs-public.json" > org-outputs.json 2>/dev/null; then
+            FOLDER_KEY="${UNIVERSITY_CODE}_${APP_ENVIRONMENT}"
+            FOLDER_ID="$(jq -r --arg key "$FOLDER_KEY" '.folder_ids[$key] // empty' org-outputs.json)"
+            BILLING_ACCOUNT_ID="$(jq -r '.billing_account_id // empty' org-outputs.json)"
+            if [[ -n "$FOLDER_ID" ]]; then
+              echo "TF_VAR_folder_id=$FOLDER_ID" >> "$GITHUB_ENV"
+              echo "✅ folder_id leido del artefacto de infra-0-org ($FOLDER_KEY): $FOLDER_ID"
+            else
+              echo "⚠️ Artefacto de infra-0-org sin folder_ids[$FOLDER_KEY] -- se usara el default de variables.tf"
+            fi
+            if [[ -n "$BILLING_ACCOUNT_ID" ]]; then
+              echo "TF_VAR_billing_account_id=$BILLING_ACCOUNT_ID" >> "$GITHUB_ENV"
+              echo "✅ billing_account_id leido del artefacto de infra-0-org"
+            fi
+          else
+            echo "⚠️ No se pudo leer gs://${ORG_OUTPUTS_BUCKET}/${ORG_OUTPUTS_PREFIX}/outputs-public.json (puede que infra-0-org aun no haya corrido el paso de publicacion) -- se usara el default de variables.tf"
+          fi
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform fmt
+        working-directory: repo
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          if [[ -n "$TF_STATE_BUCKET" && -n "$TF_STATE_PREFIX" ]]; then
+            terraform init -reconfigure \
+              -backend-config="bucket=$TF_STATE_BUCKET" \
+              -backend-config="prefix=$TF_STATE_PREFIX"
+          else
+            terraform init -backend=false -reconfigure
+          fi
+
+      - name: Terraform validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform validate
+
+      - name: Terraform plan
+        if: ${{ env.TF_ACTION == 'plan' }}
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          if [[ -n "$TF_VARS_FILE" ]]; then
+            terraform plan -var-file="$TF_VARS_FILE"
+          else
+            terraform plan
+          fi
+
+      - name: Terraform apply
+        if: ${{ github.event_name == 'workflow_dispatch' && env.TF_ACTION == 'apply' }}
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          if [[ -n "$TF_VARS_FILE" ]]; then
+            terraform apply -auto-approve -var-file="$TF_VARS_FILE"
+          else
+            terraform apply -auto-approve
+          fi
+
+      - name: Terraform plan destroy
+        if: ${{ env.TF_ACTION == 'destroy' }}
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          echo "🔍 Planning destruction of app layer"
+          terraform plan -destroy | tee destroy-plan.txt
+          if grep -q "Plan: 0 to add, 0 to change, 0 to destroy" destroy-plan.txt; then
+            echo "⚠️  No resources to destroy - infrastructure already clean"
+          else
+            DESTROY_COUNT=$(grep -oP '(?<=Plan: )\d+(?= to destroy)' destroy-plan.txt || echo "0")
+            echo "📊 Plan shows $DESTROY_COUNT resource(s) to destroy"
+          fi
+
+      - name: Terraform destroy
+        if: ${{ env.TF_ACTION == 'destroy' }}
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          echo "🚀 Executing destruction of app layer"
+          terraform destroy -auto-approve
+          echo "✅ Destroy operation completed"
