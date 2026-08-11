@@ -63,7 +63,7 @@ module "service" {
 }
 
 module "exposure" {
-  source = "git::https://github.com/edermon/infra-modules.git//modules/public-exposure?ref=v0.6.2"
+  source = "git::https://github.com/edermon/infra-modules.git//modules/public-exposure?ref=v0.6.3"
 
   app_name               = var.app_name
   project_id             = module.app_project.project_id
