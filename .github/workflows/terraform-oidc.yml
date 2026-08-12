@@ -196,8 +196,10 @@ jobs:
           set -uo pipefail
           if gcloud storage cat "gs://${ORG_OUTPUTS_BUCKET}/${ORG_OUTPUTS_PREFIX}/outputs-public.json" > org-outputs.json 2>/dev/null; then
             FOLDER_KEY="${UNIVERSITY_CODE}_${APP_ENVIRONMENT}"
+            HUB_KEY="hub_${UNIVERSITY_CODE}"
             FOLDER_ID="$(jq -r --arg key "$FOLDER_KEY" '.folder_ids[$key] // empty' org-outputs.json)"
             BILLING_ACCOUNT_ID="$(jq -r '.billing_account_id // empty' org-outputs.json)"
+            HUB_SERVICE_ACCOUNT_EMAIL="$(jq -r --arg key "$HUB_KEY" '.per_university_service_account_emails[$key] // empty' org-outputs.json)"
             if [[ -n "$FOLDER_ID" ]]; then
               echo "TF_VAR_folder_id=$FOLDER_ID" >> "$GITHUB_ENV"
               echo "✅ folder_id leido del artefacto de infra-0-org ($FOLDER_KEY): $FOLDER_ID"
@@ -207,6 +209,20 @@ jobs:
             if [[ -n "$BILLING_ACCOUNT_ID" ]]; then
               echo "TF_VAR_billing_account_id=$BILLING_ACCOUNT_ID" >> "$GITHUB_ENV"
               echo "✅ billing_account_id leido del artefacto de infra-0-org"
+            fi
+            # CIERRE DE BRECHA #7-correccion (12-ago-2026): email de
+            # sa-tf-hub-<univ>, necesario para otorgarle
+            # roles/compute.loadBalancerServiceUser sobre el backend
+            # service de esta app (ver main.tf,
+            # google_compute_backend_service_iam_member). Opcional a
+            # proposito -- si falta, el binding de IAM simplemente no se
+            # crea (var.hub_service_account_email default null), no
+            # bloquea el resto del apply.
+            if [[ -n "$HUB_SERVICE_ACCOUNT_EMAIL" ]]; then
+              echo "TF_VAR_hub_service_account_email=$HUB_SERVICE_ACCOUNT_EMAIL" >> "$GITHUB_ENV"
+              echo "✅ hub_service_account_email leido del artefacto de infra-0-org ($HUB_KEY): $HUB_SERVICE_ACCOUNT_EMAIL"
+            else
+              echo "⚠️ Artefacto de infra-0-org sin per_university_service_account_emails[$HUB_KEY] -- el binding de loadBalancerServiceUser no se creara este apply"
             fi
           else
             echo "⚠️ No se pudo leer gs://${ORG_OUTPUTS_BUCKET}/${ORG_OUTPUTS_PREFIX}/outputs-public.json (puede que infra-0-org aun no haya corrido el paso de publicacion) -- se usara el default de variables.tf"

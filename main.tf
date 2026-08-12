@@ -74,7 +74,7 @@ module "service" {
 }
 
 module "exposure" {
-  source = "git::https://github.com/edermon/infra-modules.git//modules/public-exposure?ref=v0.6.4"
+  source = "git::https://github.com/edermon/infra-modules.git//modules/public-exposure?ref=v0.6.6"
 
   app_name               = var.app_name
   project_id             = module.app_project.project_id
@@ -86,4 +86,28 @@ module "exposure" {
   use_classic_version    = var.use_classic_version
 
   depends_on = [module.service]
+}
+
+# CIERRE DE BRECHA #7-correccion (12-ago-2026): otorgar
+# roles/compute.loadBalancerServiceUser a sa-tf-hub-<university_code> a
+# nivel de este backend service especifico -- necesario para que el URL map
+# del hub (infra-1-hub) pueda referenciarlo como defaultService cross-project.
+# Un apply real confirmo que un grant a nivel de folder (intentado antes en
+# infra-0-org, commit fe948b6, revertido en 024ff03) NO satisface la
+# verificacion de GCP para este chequeo -- documentacion oficial confirma que
+# solo project-level o resource-level son scopes soportados; se elige
+# resource-level por ser el mas estrecho (mismo principio que networkUser a
+# nivel de subred en vez de proyecto, ver arq-landing-zone-gcp-
+# multiuniversidad-v3.md #10). google_compute_backend_service_iam_member usa
+# el argumento 'name' (no self_link/id), de ahi el nuevo output
+# backend_service_name de infra-modules v0.6.6.
+resource "google_compute_backend_service_iam_member" "hub_load_balancer_service_user" {
+  count = var.hub_service_account_email != null ? 1 : 0
+
+  project = module.app_project.project_id
+  name    = module.exposure.backend_service_name
+  role    = "roles/compute.loadBalancerServiceUser"
+  member  = "serviceAccount:${var.hub_service_account_email}"
+
+  depends_on = [module.exposure]
 }

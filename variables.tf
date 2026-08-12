@@ -64,6 +64,33 @@ variable "billing_account_id" {
   type        = string
 }
 
+variable "hub_service_account_email" {
+  description = <<-EOT
+    Email de sa-tf-hub-<university_code> (SA de Terraform del hub de esta
+    universidad, infra-1-hub). Normalmente NO se fija en un .tfvars -- lo
+    provee TF_VAR_hub_service_account_email desde el artefacto de outputs de
+    infra-0-org (per_university_service_account_emails, ver paso 'Fetch org
+    outputs artifact').
+
+    CIERRE DE BRECHA #7-correccion (12-ago-2026): otorgamos aqui
+    roles/compute.loadBalancerServiceUser a esta SA, a nivel del backend
+    service que este mismo repo crea (google_compute_backend_service_iam_member,
+    recurso especifico -- no el proyecto completo), para habilitar el
+    cross-project referencing real del URL map del hub. Un intento anterior
+    de otorgar este rol a nivel de folder de entorno (infra-0-org) fue
+    revertido tras confirmar con un apply real que ese scope no satisface la
+    verificacion de GCP para este chequeo (ver infra-0-org, commit 024ff03).
+
+    Nullable con default null a proposito: a diferencia de folder_id (donde
+    un valor incorrecto es costoso de deshacer), la ausencia de este valor
+    simplemente deja sin crear el binding de IAM -- el resto del apply (Fase
+    4, el propio Cloud Run) no debe bloquearse si el fetch de CI de este
+    campo puntual fallara.
+  EOT
+  type        = string
+  default     = null
+}
+
 variable "host_project_id" {
   description = <<-EOT
     Project ID del host de la Shared VPC (net_project_id de infra-2-univ).
