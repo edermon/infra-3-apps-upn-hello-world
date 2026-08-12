@@ -102,7 +102,18 @@ module "exposure" {
 # el argumento 'name' (no self_link/id), de ahi el nuevo output
 # backend_service_name de infra-modules v0.6.6.
 resource "google_compute_backend_service_iam_member" "hub_load_balancer_service_user" {
-  count = var.hub_service_account_email != null ? 1 : 0
+  # CORRECCION (12-ago-2026, terraform validate real en CI): este recurso
+  # es beta-only en el provider hashicorp/google -- confirmado contra
+  # raw.githubusercontent.com/hashicorp/terraform-provider-google-beta,
+  # website/docs/r/compute_backend_service_iam.html.markdown ("This
+  # resource is in beta, and should be used with the
+  # terraform-provider-google-beta provider"). Sin este bloque, terraform
+  # validate fallaba con "The provider hashicorp/google does not support
+  # resource type google_compute_backend_service_iam_member" -- coherente
+  # con que google_compute_backend_service.app (public-exposure) YA usa
+  # provider = google-beta por el mismo motivo.
+  provider = google-beta
+  count    = var.hub_service_account_email != null ? 1 : 0
 
   project = module.app_project.project_id
   name    = module.exposure.backend_service_name
