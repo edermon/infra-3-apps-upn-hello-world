@@ -247,9 +247,29 @@ variable "cdn_cache_mode" {
 }
 
 variable "use_classic_version" {
-  description = "Debe coincidir con el mismo valor usado en external-lb-edge de infra-1-hub para esta universidad -- confirmado: default true en ambos modulos, sin override en infra-1-hub/univ-upn/main.tf (module \"lb\")."
+  description = <<-EOT
+    Debe coincidir con el mismo valor usado en external-lb-edge de
+    infra-1-hub para esta universidad (mismo load_balancing_scheme en
+    ambos extremos del backend).
+
+    CORRECCION (12-ago-2026, causa raiz real del gap #7): el comentario
+    anterior de esta variable decia "confirmado: default true en ambos
+    modulos, sin override" -- tratando la consistencia entre ambos
+    extremos como suficiente. Era necesaria pero NO suficiente: un apply
+    real de infra-1-hub con un backend cross-project fallo tres veces
+    con "Cross-project references for this resource are not allowed",
+    incluso con el IAM ya en el scope oficialmente correcto (recurso
+    especifico, google-beta). Investigacion contra documentacion oficial
+    de GCP confirmo que el modo Classic (EXTERNAL, true) nunca soporto
+    cross-project service referencing -- la guia oficial de setup para
+    esta feature en Global External ALB solo documenta EXTERNAL_MANAGED.
+    Default cambiado a false; ver infra-1-hub/univ-upn/variables.tf
+    (use_classic_version) para el detalle completo y la nota sobre
+    revisar el terraform plan antes de aplicar este cambio contra
+    recursos ya reales.
+  EOT
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "cost_labels" {
