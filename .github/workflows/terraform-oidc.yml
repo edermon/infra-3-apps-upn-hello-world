@@ -52,6 +52,19 @@ on:
           - default
           - "true"
           - "false"
+      # CIERRE DE GAP DE SMOKE TEST (12-ago-2026): permite agregar/quitar
+      # IPs de prueba en Cloud Armor "a demanda", sin commitear IPs
+      # personales al repo -- ver variables.tf, extra_allowed_ip_ranges, y
+      # infra-modules/modules/public-exposure CHANGELOG [0.6.9]. USO
+      # EXCLUSIVO DE DEV -- nunca completar esto en un apply de cert/prod.
+      extra_allowed_ip_ranges:
+        description: >-
+          Lista separada por comas de IPs/CIDRs adicionales a permitir en
+          Cloud Armor para este apply puntual (ej. "203.0.113.7/32"). Dejar
+          vacio en cualquier apply que no sea una prueba manual puntual.
+        required: false
+        default: ""
+        type: string
   pull_request:
   push:
     branches:
@@ -286,6 +299,17 @@ jobs:
           if [[ -n "$CLASSIC_OVERRIDE" && "$CLASSIC_OVERRIDE" != "default" ]]; then
             echo "TF_VAR_use_classic_version=$CLASSIC_OVERRIDE" >> "$GITHUB_ENV"
             echo "⚠️ Override manual activo: use_classic_version=$CLASSIC_OVERRIDE"
+          fi
+          # CIERRE DE GAP DE SMOKE TEST (12-ago-2026): convierte el input de
+          # texto separado por comas a una lista JSON valida para
+          # TF_VAR_extra_allowed_ip_ranges (list(string) real de
+          # variables.tf). Vacio -> no se fija nada, se respeta el default
+          # [] del modulo -- ver extra_allowed_ip_ranges mas arriba.
+          EXTRA_IPS="${{ github.event.inputs.extra_allowed_ip_ranges }}"
+          if [[ -n "$EXTRA_IPS" ]]; then
+            EXTRA_IPS_JSON="$(python3 -c "import json,sys; print(json.dumps([x.strip() for x in sys.argv[1].split(',') if x.strip()]))" "$EXTRA_IPS")"
+            echo "TF_VAR_extra_allowed_ip_ranges=$EXTRA_IPS_JSON" >> "$GITHUB_ENV"
+            echo "⚠️ Override manual activo (SOLO DEV): extra_allowed_ip_ranges=$EXTRA_IPS_JSON"
           fi
 
       - name: Set up Terraform

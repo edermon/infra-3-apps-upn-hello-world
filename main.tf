@@ -74,13 +74,14 @@ module "service" {
 }
 
 module "exposure" {
-  source = "git::https://github.com/edermon/infra-modules.git//modules/public-exposure?ref=v0.6.7"
+  source = "git::https://github.com/edermon/infra-modules.git//modules/public-exposure?ref=v0.6.9"
 
   app_name                         = var.app_name
   project_id                       = module.app_project.project_id
   region                           = var.region
   cloud_run_service_name           = module.service.service_name
   cloudflare_ip_ranges             = var.cloudflare_ip_ranges
+  extra_allowed_ip_ranges          = var.extra_allowed_ip_ranges
   enable_cdn                       = var.enable_cdn
   cdn_cache_mode                   = var.cdn_cache_mode
   use_classic_version              = var.use_classic_version

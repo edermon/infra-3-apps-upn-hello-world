@@ -236,6 +236,29 @@ variable "cloudflare_ip_ranges" {
   ]
 }
 
+variable "extra_allowed_ip_ranges" {
+  description = <<-EOT
+    CIERRE DE GAP DE SMOKE TEST (12-ago-2026): rangos IP/CIDR adicionales
+    permitidos por Cloud Armor, ADEMAS de var.cloudflare_ip_ranges -- ver
+    infra-modules/modules/public-exposure CHANGELOG [0.6.9]. Necesaria
+    porque, sin dominio real todavia detras de Cloudflare, ningun origen
+    externo real puede pasar el borde del LB para validar que la app
+    responde. Normalmente NO se fija en un .tfvars -- se provee via
+    TF_VAR_extra_allowed_ip_ranges desde el input de workflow_dispatch
+    extra_allowed_ip_ranges (ver .github/workflows/terraform-oidc.yml),
+    para poder agregar/quitar la IP de quien esta probando "a demanda",
+    sin commitear IPs personales al repo.
+
+    USO EXCLUSIVO DE DEV/PRUEBAS MANUALES -- NUNCA declarar esto para
+    cert/prod (ver advertencia completa en la variable del modulo). Default
+    vacio a proposito: sin override explicito, el comportamiento es
+    identico al de antes de que existiera esta variable.
+  EOT
+  type        = list(string)
+  default     = []
+  nullable    = false
+}
+
 variable "enable_cdn" {
   type    = bool
   default = true
