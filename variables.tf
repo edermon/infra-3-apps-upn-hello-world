@@ -272,6 +272,44 @@ variable "use_classic_version" {
   default     = false
 }
 
+variable "external_managed_migration_state" {
+  description = <<-EOT
+    CIERRE DE BRECHA #7 (12-ago-2026): controla la migracion en fases de
+    load_balancing_scheme de EXTERNAL (Classic) a EXTERNAL_MANAGED en el
+    backend service de esta app. Necesaria porque un apply real (con
+    use_classic_version ya en false) fallo:
+
+      Error 400: Invalid value for field 'resource.loadBalancingScheme':
+      'EXTERNAL_MANAGED'. Cannot change the load balancing scheme until
+      the migration state is set to TEST_ALL_TRAFFIC., invalid
+
+    GCP no permite cambiar el scheme de un backend service YA EXISTENTE de
+    forma atomica -- exige el flujo oficial de migration state (ver
+    docs.cloud.google.com/load-balancing/docs/https/migrate-from-classic-global):
+
+      1) external_managed_migration_state = "PREPARE"          (use_classic_version aun true)
+      2) esperar minutos reales de propagacion (GCP recomienda 6+)
+      3) external_managed_migration_state = "TEST_ALL_TRAFFIC" (use_classic_version aun true)
+      4) esperar minutos reales de propagacion
+      5) use_classic_version = false, external_managed_migration_state = null (o sin fijar)
+
+    Cada paso es un apply distinto y separado en el tiempo -- no se puede
+    hacer en un solo terraform apply. Nullable con default null a proposito:
+    un consumidor que crea el backend service por primera vez directamente
+    en EXTERNAL_MANAGED (sin pasar nunca por EXTERNAL) no necesita fijar
+    este campo. Ver infra-modules/modules/public-exposure CHANGELOG [0.6.7]
+    y .github/workflows/terraform-oidc.yml (input migration_state) para el
+    mecanismo de control por apply.
+  EOT
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.external_managed_migration_state == null || contains(["PREPARE", "TEST_BY_PERCENTAGE", "TEST_ALL_TRAFFIC"], var.external_managed_migration_state)
+    error_message = "external_managed_migration_state debe ser null, \"PREPARE\", \"TEST_BY_PERCENTAGE\" o \"TEST_ALL_TRAFFIC\"."
+  }
+}
+
 variable "cost_labels" {
   type = map(string)
   default = {

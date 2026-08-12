@@ -16,6 +16,42 @@ on:
         description: Type "destroy-app-layer" to confirm destruction
         required: false
         type: string
+      # CIERRE DE BRECHA #7 (12-ago-2026): control manual, apply-por-apply,
+      # de la migracion en fases Classic->Managed del backend service (ver
+      # variables.tf, external_managed_migration_state, y
+      # infra-modules/modules/public-exposure CHANGELOG [0.6.7]). Cada fase
+      # real de la migracion (PREPARE -> TEST_ALL_TRAFFIC -> cambio de
+      # scheme) requiere un apply manual distinto, separado por minutos
+      # reales de propagacion -- no se puede automatizar en un solo push,
+      # de ahi que esto sea un input de workflow_dispatch y no una variable
+      # de repo fija.
+      migration_state:
+        description: >-
+          Fase de external_managed_migration_state para este apply (dejar
+          "none" fuera de una migracion activa). Ver variables.tf para el
+          flujo completo de fases.
+        required: false
+        default: none
+        type: choice
+        options:
+          - none
+          - PREPARE
+          - TEST_BY_PERCENTAGE
+          - TEST_ALL_TRAFFIC
+      classic_scheme_override:
+        description: >-
+          Fuerza use_classic_version para este apply puntual (usar "true"
+          durante las fases PREPARE/TEST_ALL_TRAFFIC, ya que el scheme real
+          del backend service sigue siendo Classic hasta el ultimo paso de
+          la migracion). "default" respeta el valor de variables.tf
+          (actualmente false).
+        required: false
+        default: default
+        type: choice
+        options:
+          - default
+          - "true"
+          - "false"
   pull_request:
   push:
     branches:
@@ -226,6 +262,30 @@ jobs:
             fi
           else
             echo "⚠️ No se pudo leer gs://${ORG_OUTPUTS_BUCKET}/${ORG_OUTPUTS_PREFIX}/outputs-public.json (puede que infra-0-org aun no haya corrido el paso de publicacion) -- se usara el default de variables.tf"
+          fi
+
+      # CIERRE DE BRECHA #7 (12-ago-2026): traduce los inputs manuales de
+      # workflow_dispatch (migration_state, classic_scheme_override) a
+      # TF_VAR_* -- solo cuando corren via workflow_dispatch y con un valor
+      # distinto del default, para no afectar los runs automaticos de
+      # pull_request/push (donde estos inputs no existen y su valor por
+      # defecto de GitHub Actions seria una cadena vacia, no "none"/
+      # "default"). Fuera de una migracion activa esto es un no-op: se
+      # respeta que use_classic_version=false y
+      # external_managed_migration_state=null (default de variables.tf).
+      - name: Apply migration-state overrides (manual, workflow_dispatch only)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          set -uo pipefail
+          MIGRATION_STATE="${{ github.event.inputs.migration_state }}"
+          CLASSIC_OVERRIDE="${{ github.event.inputs.classic_scheme_override }}"
+          if [[ -n "$MIGRATION_STATE" && "$MIGRATION_STATE" != "none" ]]; then
+            echo "TF_VAR_external_managed_migration_state=$MIGRATION_STATE" >> "$GITHUB_ENV"
+            echo "⚠️ Override manual activo: external_managed_migration_state=$MIGRATION_STATE"
+          fi
+          if [[ -n "$CLASSIC_OVERRIDE" && "$CLASSIC_OVERRIDE" != "default" ]]; then
+            echo "TF_VAR_use_classic_version=$CLASSIC_OVERRIDE" >> "$GITHUB_ENV"
+            echo "⚠️ Override manual activo: use_classic_version=$CLASSIC_OVERRIDE"
           fi
 
       - name: Set up Terraform
