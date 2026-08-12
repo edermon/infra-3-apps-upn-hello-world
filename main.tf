@@ -23,13 +23,24 @@ locals {
     app         = var.app_name
   })
 
-  # cloud-run-service.vpc_subnetwork espera un self-link, pero
-  # service-project.run_subnetwork (passthrough de var.run_subnetwork) usa
-  # el formato 'region/nombre' -- el mismo formato que publica infra-2-univ.
-  # Se construye el self-link real a partir de host_project_id + los dos
-  # componentes del string, sin necesitar un data source adicional.
-  run_subnetwork_parts     = split("/", module.app_project.run_subnetwork)
-  run_subnetwork_self_link = "https://www.googleapis.com/compute/v1/projects/${module.app_project.host_project_id}/regions/${local.run_subnetwork_parts[0]}/subnetworks/${local.run_subnetwork_parts[1]}"
+  # CORRECCION (12-ago-2026): un apply real de infra-3-apps-upn-hello-world
+  # fallo creando el google_cloud_run_v2_service con:
+  #   Error 400: Expected a subnetwork name like projects/*/regions/*/subnetworks/*,
+  #   but obtained https://www.googleapis.com/compute/v1/projects/.../subnetworks/...
+  # El campo real de la API (network_interface.subnetwork, dentro de
+  # revision.vpc_access de fabric/cloud-run-v2, que cloud-run-service.vpc_subnetwork
+  # pasa sin transformar) NO acepta un self-link completo con protocolo/host
+  # -- pese a que el nombre de la variable (vpc_subnetwork) y su descripcion
+  # en infra-modules/modules/cloud-run-service/variables.tf ("Subnetwork
+  # self-link") sugerian lo contrario. Acepta solo el resource name corto
+  # projects/<proj>/regions/<region>/subnetworks/<name>. service-project.run_subnetwork
+  # (passthrough de var.run_subnetwork) usa el formato 'region/nombre' -- el
+  # mismo formato que publica infra-2-univ -- se construye aqui el resource
+  # name corto a partir de host_project_id + los dos componentes del string,
+  # sin necesitar un data source adicional ni el prefijo
+  # https://www.googleapis.com/compute/v1/.
+  run_subnetwork_parts = split("/", module.app_project.run_subnetwork)
+  run_subnetwork_short = "projects/${module.app_project.host_project_id}/regions/${local.run_subnetwork_parts[0]}/subnetworks/${local.run_subnetwork_parts[1]}"
 }
 
 module "app_project" {
@@ -45,7 +56,7 @@ module "app_project" {
 }
 
 module "service" {
-  source = "git::https://github.com/edermon/infra-modules.git//modules/cloud-run-service?ref=v0.6.2"
+  source = "git::https://github.com/edermon/infra-modules.git//modules/cloud-run-service?ref=v0.6.5"
 
   service_name   = local.service_name
   project_id     = module.app_project.project_id
@@ -53,7 +64,7 @@ module "service" {
   image          = var.image
   min_instances  = var.min_instances
   max_instances  = var.max_instances
-  vpc_subnetwork = local.run_subnetwork_self_link
+  vpc_subnetwork = local.run_subnetwork_short
   cpu_limit      = var.cpu_limit
   memory_limit   = var.memory_limit
   env_vars       = var.env_vars
